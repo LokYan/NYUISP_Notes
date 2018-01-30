@@ -1,0 +1,74 @@
+\documentclass[12pt,lettersize]{book}
+
+%lmtt gives us bf for tt fonts whereas the default cmtt doesn't
+\renewcommand{\ttdefault}{lmtt}
+
+\setlength\textwidth{6.5in}
+\setlength\oddsidemargin{0in}
+\setlength\evensidemargin{0in}
+
+\setlength\parindent{0em}
+\setlength\parskip{1em}
+
+\usepackage[hidelinks]{hyperref} %for url
+\usepackage{fancyvrb} %for Verbatim
+\usepackage{listings} %for lstinline
+\usepackage{mdframed} %for frames for segues
+\usepackage{graphicx}
+
+\lstset{basicstyle=\ttfamily}
+
+\newenvironment{code}{\footnotesize
+\Verbatim[frame=single,numbers=left,xleftmargin=2em]}{\endVerbatim}
+\newenvironment{code2}[1]{\footnotesize
+\Verbatim[frame=single,numbers=left,xleftmargin=2em,commandchars=#1]}{\endVerbatim}
+\newenvironment{codefile}[1]{\footnotesize
+\Verbatim[frame=single,numbers=left,xleftmargin=2em,label=#1]}{\endVerbatim}
+%the numbering don't look nice enough though.
+
+\newcommand{\inlinedcode}{\lstinline}
+\newcommand{\ignore}[1]{}
+%\newenvironment{note}{\begin{minipage}{\textwidth} \bf NOTE:}{\end{minipage}}
+%didn't really work due to font and paragraph issues
+
+%\newcommand{\note}{\textbf{NOTE:} \textbf}
+%didn't work because this won't accept additional declarations
+
+\newmdenv[leftline=false,rightline=false,skipabove=12pt,skipbelow=12pt]{note}
+\newmdenv[leftline=false,rightline=false,skipabove=12pt,skipbelow=12pt]{triple}
+\newmdenv[skipabove=12pt,skipbelow=12pt]{segue}
+%\newenvironment{segue}[1]{\Verbatim[frame=single,label=#1]}{\endVerbatim}
+
+\ignore{
+\lstdefinestyle{MyStyle}{%
+basicstyle=\footnotesize\ttfamily,
+numbers=left,
+numberstyle=\footnotesize,
+framexleftmargin=2em,
+frame=single,
+fancyvrb=true,
+linewidth=.8\textwidth,
+}
+
+%\newenvironment{MyCode}{\lstset{style=MyStyle} \Verbatim[frame=single]}{\endVerbatim}
+\lstnewenvironment{MyCode}{\lstset{style=MyStyle}}{}
+}
+
+\title{Lecture Notes for Information Security and Privacy}
+\author{Lok Yan}
+
+\begin{document}
+
+\maketitle
+
+\chapter{Intro}
+Here is a citation so Latex/bibtex stops complaining. \cite{NYUISP_Notes_Github}
+
+\input{IntroToAssembly/IntroToAssembly}
+\input{Assignments/PasswordCracking}
+\input{Assignments/BufferOverflow}
+\input{Assignments/FormatString}
+
+\bibliographystyle{acm}
+\bibliography{NYUISP_Notes}
+\end{document}

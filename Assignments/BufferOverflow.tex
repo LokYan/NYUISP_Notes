@@ -1,0 +1,221 @@
+\chapter{Notes for the Buffer Overflow Assignment}
+
+\section{Additional Concepts}
+In addition to completing the buffer overflow assignment, you should understand the following concepts.
+
+\subsection{What is a segmentation fault and why do I get one?}
+
+In short, a segmentation fault is an exception that is thrown when a memory address that you are trying to access is invalid. Since we rarely use segmentation and instead use paging, it is an exception that is thrown when you try to access memory that is either not mapped (i.e. there is no virtual to physical address translation) or if the memory page is not mapped correctly (i.e. you want to write to a read only page). This can be demonstrated using a simple c program. 
+
+\begin{code}
+int main(void)
+{
+  int *ip = 0;
+  *ip = 0;
+  return (0);
+}
+\end{code}
+
+We get a segmentation fault because we are trying to write a value of {\tt 0} to the address {\tt 0} on line 4, which is not mapped in Linux environments (such as SEED). Since the address is not mapped, we can’t access it and thus we will get a segmentation fault.
+
+To illustrate the second case, we can try to perform a write to a page that is mapped, but is not mapped for writing. A good choice would be the memory page where {\em main} is located. Since the {\em main} function is executable, the default behavior is to map the page as executable and read only. Thus writing to the code page will not be allowed.
+
+\begin{code}
+int main(void)
+{
+  *((int*)main) = 0;
+  return (0);
+}
+\end{code}
+
+You can verify that we can indeed read from the code page (i.e. that the memory address is valid) by performing a read instead of a write. I leave that to you as an exercise.
+
+As an additional exercise, I highly suggest that you try to write a simple program to execute code on the stack when no-exec-stack (NX) is enabled. A good place to start is with the sample shellcode program from the assignment description itself.
+
+A related question that students have asked in the past is what is an illegal instruction error. I will let you figure that out, but if you get that it would mean that the address is valid and the page is executable. 
+
+\subsection{What is the significance of the NOP sled?}
+
+A long time ago, guessing the address of something (such as on the stack) was fairly easy because there was a limited number of systems with a limited number of configurations. Today, diversity and address space layout randomization has made predicting such addresses difficult. We can illustrate the problem due to diversity here. 
+
+System diversity (versus monoculture) means that each system will have a different configuration. Configuration includes the operating system installed as well as the software installed and even configuration options. One of the clearest examples of differences in configuration is ``Environment Variables.''
+
+An environment variable is a shell configuration option. For example, many programmers have had experience with setting the {\em PATH} variable. To see what the current path variable value is we can either use the {\em env} command or simply echo the variable contents to the terminal.
+
+\begin{code}
+seed@SEED:~$ env | grep "^PATH="
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin
+
+seed@SEED:~$ echo $PATH
+/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin
+\end{code}
+
+Given this, we almost know enough to see how changing the environment variables might change offsets. It is important to first recognize how a program is executed and where the parameters go. 
+
+In linux, a program is executed through the {\em fork}, {\em exec} combo. {\em fork} is a system call that creates an exact copy of the calling process, and {\em exec} is a system call that replaces the currently executing program with a new program (i.e. new executable code). 
+
+In a nutshell, the {\em init} process is the first process that is created when the system is booted. To start a new process, the {\em init} process will fork itself (now there are two copies of {\em init}) followed by an exec to start the new process, e.g. the bash shell. Similarly, when you start a new program in {\em bash}, {\em bash} will fork itself to make a new copy and then the new copy will exec the new program. (For those of you who are adventurous, you can start to dig deeper into this process and try to figure out why fork/exec is great for performance when it comes to the Zygote process in Android, but also poses a challenge for enabling address space layout randomization for Android processes.)
+
+Given we know that new processes are effectively started with fork followed by exec, we can now focus on the exec system call. {\em execve} (the real name) has the following prototype:
+
+\begin{code}
+int execve(const char *filename, char *const argv[], char *const envp[]);
+\end{code}
+
+The first parameter is the file to execute (i.e. path of the new program), the second is a pointer to an array of c-strings (i.e. char*) that contains the arguments to the program and finally the last is a pointer to the environment variables. These are the same environment variables that were discussed above.
+
+The next natural question to ask is where does all of this information go? How does the program know what the arguments are? What is the protocol or the API or the ABI equivalent - what is the agreed upon language or specification?
+
+If you recall, function calls are made such that the parameters are pushed onto the stack in reverse order. Linux takes the same basic idea when exec-ing new programs. The standard is to push all of the environment variables onto the stack first, followed by the arguments. Then control is transferred to the new program.
+
+What this means is that if we change the environment variables, then the location of local variables on the stack should also change because more stuff have to be pushed onto the stack. We can test this theory out by writing another simple program. 
+
+\begin{code}
+#include <stdio.h>
+
+int main(void)
+{
+  int i = 0;
+  printf ("Address of i is: [%p]\n", &i);
+  return (0);
+}
+\end{code}
+
+Now before we compile and execute the program, we have to isolate our variables first by disabling address space layout randomization. If we forget this step, then we will get random addresses, making the results less obvious.
+
+\begin{code}
+seed@SEED:~/TEST$ cat /proc/sys/kernel/randomize_va_space 
+2
+seed@SEED:~/TEST$ echo 0 | sudo tee /proc/sys/kernel/randomize_va_space 
+[sudo] password for seed: 
+0
+seed@SEED:~/TEST$ cat /proc/sys/kernel/randomize_va_space 
+0
+\end{code}
+
+Once we compiled this and execute it, we should see something like this: 
+
+\begin{code}
+seed@SEED:~/TEST$ gcc env_test.c
+seed@SEED:~/TEST$ ./a.out 
+Address of i is: [0xbffff0a8]
+seed@SEED:~/TEST$ ./a.out 
+Address of i is: [0xbffff0a8]
+seed@SEED:~/TEST$ ./a.out 
+Address of i is: [0xbffff0a8]
+\end{code}
+
+Notice how the address that is printed out is consistent, telling us that ASLR is indeed disabled.
+
+Given this, we can now play with the environment variables to see how the addresses change. For example:
+
+\begin{code}
+seed@SEED:~/TEST$ export TEST_ENV=hi
+seed@SEED:~/TEST$ ./a.out 
+Address of i is: [0xbffff088]
+seed@SEED:~/TEST$ export TEST_ENV=bye
+seed@SEED:~/TEST$ ./a.out 
+Address of i is: [0xbffff088]
+seed@SEED:~/TEST$ export TEST_ENV=byeworld
+seed@SEED:~/TEST$ ./a.out 
+Address of i is: [0xbffff088]
+seed@SEED:~/TEST$ export TEST_ENV=byeworldyouaretoocruel
+seed@SEED:~/TEST$ ./a.out 
+Address of i is: [0xbffff078]
+seed@SEED:~/TEST$ export TEST_ENV=
+seed@SEED:~/TEST$ ./a.out 
+Address of i is: [0xbffff088]
+\end{code}
+
+If you look at the output, you should see that once I exported the new environment variable, the address went down from {\tt ...a8} to {\tt ...88}. What this means is that the addition of the {\em TEST\_ENV} variable (which in memory will look something like ``TEST\_ENV=hi'', a 12 byte c-string) have effectively pushed the contents of the stack further down in memory (remember stack grows down, so the more stuff you push into the stack the lower the address of the things towards the top of the stack will be). 
+
+What is interesting is that adding an additional byte (changing our test variable from ``hi'' to ``bye'') did not change the address of the variable. In fact, it didn’t change until we added many more characters to the environment variable. Why is this? Because of alignment. 
+
+I will leave it to the student to reason as to why resetting the {\em TEST\_ENV} to the empty string will move the address back up. I will also leave it to the student to run similar tests to see how adding arguments can also change the address of things in memory.
+
+
+As an aside, export sets the environment variables permanently for the session, you can set them temporarily by prepending the program call with the environment you want to set, for example:
+
+\begin{code}
+seed@SEED:~/TEST$ TEST_ENV=helloworldyouaregreat ./a.out 
+Address of i is: [0xbffff078]
+seed@SEED:~/TEST$ ./a.out 
+Address of i is: [0xbffff088]
+\end{code}
+
+Given all of this, I hope it is a bit more clear why you would want a NOP sled. It is hard to figure out what the address on the particular machine you are targeting is going to be, so why not give yourself some wiggle room. 
+
+\subsection{How do system calls work?}
+
+As discussed in class, a system call is just another interface similar to a library. It is just another abstraction layer. As with any abstractions, we need a specification as how to to interface with each other. 
+
+Linux actually has many standards one corresponding to each hardware architecture. To get a list, you can try {\em man 2 syscall} in your seed ubuntu machine. You should find something like the one shown in table \ref{table:man_syscall}. We didn't copy the entire table and ended with i386 because that is the system that we are dealing with. The table readily tells us which register is tasked with holding which parameter/argument. Notice how this is different from the function calling standard where the arguments are pushed onto the stack. In fact there is a ``fast call'' standard for function calls that uses registers instead of the stack. Interested students and go and look that up.
+
+\begin{table}
+\begin{tabular}{l l l l l l l l l} \\ 
+       arch/ABI     & arg1 & arg2 & arg3 & arg4 & arg5 & arg6 & arg7 & Notes \\ \hline
+       arm/OABI     & a1   & a2   & a3   & a4   & v1   & v2   & v3 \\
+       arm/EABI     & r0   & r1   & r2   & r3   & r4   & r5   & r6 \\
+       arm64        & x0   & x1   & x2   & x3   & x4   & x5   & - \\
+       blackfin     & R0   & R1   & R2   & R3   & R4   & R5   & - \\
+       i386         & ebx  & ecx  & edx  & esi  & edi  & ebp  & - \\
+\end{tabular}
+\label{table:man_syscall}
+\end{table}
+
+
+Given this information, we should now have an idea of how system calls are made. We can illustrate this using an example. 
+
+\begin{code}
+.global _start
+
+.text
+_start:
+  mov $11, %eax
+  mov $shell, %ebx
+  mov $argv, %ecx
+  mov $0, %edx
+  int $0x80
+
+  mov $1, %eax
+  mov $0, %ebx
+  int $0x80
+
+.data
+shell:
+  .ascii "/bin/sh"
+  .long 0
+
+argv:
+  .long shell
+  .long 0
+\end{code}
+
+If we compile the above program and executed it, we should then get a shell. Notice the need for {\em -nostdlib} in the gcc command which basically states that we don’t want libc. 
+
+\begin{code}
+seed@SEED:~/TEST$ gcc -nostdlib exec.s
+seed@SEED:~/TEST$ ./a.out 
+$ exit
+\end{code}
+
+The main question now is what does the assembly program above do?
+
+Let’s start from the top. The first thing we see is {\tt .global \_start} this is used to state that there is a global variable named {\em \_start}. {\em \_start} is the entry point for programs. If you are wondering this is the actual starting point for programs, not main. The main function that we are all used to is actually the start of libc programs if you may. To put it differently, libc abstracts away all of these details by having its own \_start handling routine. That routine will do some setup followed by calling the main function. 
+
+The next big section is the {\tt .text} section, which is the executable or the code section. We will revisit this later. 
+
+The next section is the {\tt .data} section which is used to store global variables (i.e. those variables that are neither on the stack nor the heap). In this section we define two variables (or actually references) the first being {\em shell} and the second being {\em argv}. Notice that the shell variable is the ascii characters ``/bin/sh'' followed by a long (4 byte) of {\tt 0}. Alternatively we could have used ``/bin/sh\textbackslash 0'' to create a c-string.
+
+We also created another variable called argv which has a long with the address of shell followed by a 0 (NULL pointer). This is our pointer of arrays.
+
+Now going back to the code, we can separate it into two major sections corresponding to the two {\em int \$0x80}’s. If you recall, the {\em int \$0x80} instruction is used to transition to the kernel so that we can make system calls. 
+
+The second one is easier to understand so let’s start with that one. Notice there are three instructions that effectively set {\tt eax} to 1, {\tt ebx} to 0 and then make the system call. To interpret this, we must first go and see what system call number 1 is. If you go online and do some googling, you might find that system call 1 is actually exit. 
+
+If you do a {\em man 2 exit}, you will also see that it takes one parameter the exit status. Since the previous table shows us that the first argument goes into {\tt ebx}, these three instructions are the equivalent of calling ``exit(0).'' You can actually test this by commenting out (\#) the first few instructions and then compiling and executing the program and then checking the return code using \$? such as {\em echo \$?}. 
+
+Either way, that explains the second system call. For the first system call, we see that the system call number is 11. As we discussed in class this is for execve, which takes 3 parameters (see above). First is the path, second is the argv and third is envp. As you can see the path is ``shell'' which is actually the c-string ``/bin/sh''. {\tt ecx} is argv which is the array \&shell,0 which is the same as \inlinedcode{argv[0] = "/bin/sh"} and \inlinedcode{argv[1] = NULL}. Finally {\tt edx} is 0 which is the same a NULL.
+
+To see what happens, we can compile the program and execute it as shown above. 
+
