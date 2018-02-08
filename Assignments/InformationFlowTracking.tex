@@ -1,0 +1,231 @@
+\chapter{Information Flow Tracking Notes}
+
+Security policies and security mechanisms. These are two of the main concepts covered in this course
+and we will delve into it a little bit more in this assignment.
+
+In the Policy lecture, we discussed how we can model security policies as well as some of the more
+famous security policies such as BLP and BIBA. In any of these policies, we stated that the crux of the
+problem is trying to figure out and define what Subjects has access to what Objects and in what Way.
+One question that you might ask is, okay, let’s say we have a policy - how do we enforce it? One way is
+through information flow tracking.
+
+Imagine that you are a security professional at an organization. You know that someone has been
+stealing the company’s IP and would like a solution. What can you do? Now before we start to throw
+ideas out there, perhaps we might want to consider how this is done in the real world. Instead of
+thinking about the theft of information, perhaps we can think about the theft of merchandise. This is
+known as ``loss prevention.''
+
+We probably have lots of experience with loss prevention technologies such as the little tags that are
+attached to clothing. The main idea is to tag every single article of clothing (ones that are worth a lot).
+When someone purchases the article, the cashier will use a special machine to remove the tag. If on the
+other hand the tag was not removed (e.g., you did not pay for it) then sensors at the entrance/exit will
+pick up the tag and sound the alarm.
+
+This seems to work well enough, so let’s try to dig down into the fundamentals as we like to do in this
+course. If we think about this particular mechanism, we will see that it involves a ``tag'' that is used to tag
+articles of clothing. In addition to the tag, there must also be a number of ``sensors'' that can be used to
+identify the presence of tags. Finally, there is a machine or technique that can be used to ``remove'' the
+tags. This brings us to four different parts, a {\em tag}, a machine to {\em attach} the tag in the first place, a {\em sensor},
+to identify the tag, and a machine to {\em manipulate} (remove) the tag.
+
+Let’s try to apply the same idea to the computer world. In the computer realm, instead of an article of
+clothing, we have an article of information -- a piece of data. So instead of tagging clothing, we now
+have to tag data.
+
+Now one of the main observations that we made during the first module was that computers are
+different from the real world because of the ability to make exact copies of data. So, imagine if you were
+in a store and was able to take an article of clothing and make an exact copy of it. What should we do
+with that tag? Should the copy also have a tag associated with it or should the copy not have a tag?
+
+In the end, it would only make sense if the new copy also has a security tag. Therefore, when we make a
+copy of digital information, we must also make a copy of the tag. The problem is more nuanced though.
+In a computer, we don’t only have to make copies of information, but we can also transform it. For
+example, what happens if we compress a file. Should the compressed file also contain a tag? What we
+encrypt it? What if we take every single byte and add 1 to it? The list continues.
+
+If you are not convinced with those examples, what if you add 1 to a piece of numerical data and then
+followed by a subtract 1? Mathematically it would mean $data + 1 - 1$ which is the same thing as $data$. In other
+words, since there are transformations that are equivalent to a copy, we need to worry more than just
+the copy operations.
+
+So, due to the ability to readily transform any data (especially in a way that can be reversed like the add,
+sub example) we not only need to tag copies of the data, but also any transformations of the data. This
+means that we now have an additional requirement to propagate the tag across different operations on
+digital data.
+
+Given all of this, we now have 4 different parts: {\em tags}, {\em sources} (the thing to attach the original tag), {\em sinks}
+(the equivalent of the sensor at the entrance/exit), and {\em propagation rules} (including all manipulations
+and not just the attachment and removal). These parts constitute our ``model'' of the problem.
+
+This assignment is designed to give you some insights into how difficult this is in practice. The first part
+of the assignment asks you to look into the details on how one might go about figuring out how data is
+tagged and how the tags are propagated through operations. To be clear, the operations that you are
+asked to look into are very basic operations that might be part of a CPU’s instruction set architecture.
+
+While we would prefer to define the propagation rules (rules that determine how tags are propagated)
+on large operations such as copying, encrypting, compressing, etc. we can’t do this because it is difficult,
+if not impossible, to identify all possible copying, encrypting, compressing, and other functions in a
+computer. When we think we have enumerated all of them, an attacker can simply implement a new
+function or operation.
+
+The one thing that an attacker cannot change is the CPU that is used to execute the instructions that
+make up these functions. Therefore, it makes sense to figure out how to propagate tags using these
+basic instructions -- we will call the decision to apply propagation rules to individual instructions, blocks,
+functions, libraries, programs, or others the {\em analysis granularity}. These describe at what granular level we are analyzing the tags.
+
+Let’s go back to our clothing example for a second. This time, instead of just tagging clothing to prevent
+theft, imagine if you were also worried about the intellectual property - the design for example. Perhaps
+you can imagine working for a company that has a new top-secret thing that is being showcased to some
+visitors. You want your visitors to be able to see the new fangled device, but you don’t want them to be
+able to steal it (therefore the tagging) nor do you want them to be able to take a picture of it because
+you are worried that they might be able to reverse engineer the device from the photo.
+
+In this case, taking a picture is just an example of some of these more advanced functions similar to
+encryption in a computer. What do we do? What if we really want the visitors to take pictures all they
+want, as long as they don’t take a picture of the specific thing? (If any of you have visited the Crown
+Jewels, then you will know that visitors can take pictures of everything else except the Crown Jewels (see
+\url{https://www.huffingtonpost.com/2014/06/12/places-you-cant-take-photos_n_5411226.html} for some
+examples).
+
+EIther way, back to our train of thought here. We want visitors to be able to take pictures of everything
+else, except for the thing that we have tagged. How do we decide this? One approach is to put guards
+around to prevent people from taking any pictures at all. That is certainly effective, however it might not
+satisfy psychological acceptability. Alternatively, you might allow people to take any pictures they want,
+but then before they leave, you check every single one of their photos to see if your secret device is in
+any of the pictures. If so, then you stop them.
+
+In this latter case, how do you identify the object in question? Are you confident that whoever is
+checking will be able to identify it? What if the picture is taken from the side? The top? What if it’s a
+reflection? Or maybe a shadow?
+
+This illustrates the problem at hand, we can try to enumerate all of the different possibilities, but there 
+there has to be a better way of doing it. Theoretically, this known as the non-interference property \cite{Goguen82}. 
+It is important to note that the original paper discussed non-interference in the context of classification levels
+but it should not be difficult to map our problem into the non-interference model. The property states
+that given two things, $A$ and $B$, 
+
+\begin{definition}
+$A$ is non-interfering with $B$ if and only if making {\em any} changes to $A$ will {\em not} affect $B$
+\end{definition}
+
+In the context of the picture problem, this is the same as asking if
+making any changes to the object in question will or will not affect the picture. To see how this 
+might work, imagine yourself taking two pictures while I have the opportunity to make any changes 
+to the object that you are trying to take a picture of. So there are three steps:
+
+\begin{enumerate}
+\item Take picture $p_1$ of the object $o$
+\item I make any changes that I want to object $o$
+\item Take picture $p_2$ of the same object $o$
+\end{enumerate}
+
+If $p_1 \neq p_2$ then I am interfering with you. If they are the same, then I am not interfering
+with you because what I did did not affect what you are doing. So if you are taking a selfie in New York
+and I am walking around in Amsterdam, then I am not interfering with you. If I happened to be in New York
+as well plus I am walking behind you then I am interfering with you since I might photo-bomb your 
+selfie. On the other hand, if I was walking in front of you I might not interfere with you, unless
+I happened to bump into your selfie-stick or perhaps I am in the process of taking a selfie myself
+with the flash on and my flash happens to illuminate you which would make your selfie brighter than
+if I wasn't around. This latter example highlights the problem with trying to enumerate all possible
+operations. 
+
+Let’s look at a concrete computer example.
+As a quick reminder, what we want to know is how the tag for an object should be propagated. In terms of
+the basic operations that we are dealing wiht, the objects are actually registers since the CPU 
+instructions operate on registers. In particular, there will be input registers as well as output
+registers and our goal is to determine whether the output registers should be tagged if the 
+input registers are tagged. To put it in non-interference terms, we want to determine if
+the input registers interfere with the output registers. As we will see, this will depend, not 
+only on whether the registers are tagged, but also what values they contain. 
+
+\begin{definition}
+Given an operation, $op$ which take an input $i$ with possible assignments (values) of $v_i$ and 
+generates an output $o$ with possible assignments $v_o$, i.e., $v_o = op(v_i)$, 
+we say that $i$ is interfering with $o$ if and only if $\exists v_i, v_i' \mid v_o' \neq v_o \land v_i \neq v_i'$
+\end{definition}
+
+In the case of a direct copy, propagating tags is
+straightforward because the non-interference property is clear. Any changes to the value of the input 
+register will directly affect the value of output register. Therefore, if the input is tagged, then 
+the copy should also be tagged. The problem gets
+complicated when we think about more complex instructions though. Take the multiply instruction as a
+quick example. Unlike direct copy that has one input and one output parameter, multiply takes 2 input
+parameters and has 1 output parameter.
+
+To support this, we must first expand our definition above to support multiple inputs and outputs.
+
+\begin{definition}
+Given an operation, $op$ with takes inputs $I = \{i_1, i_2, ..., i_n\}$ and generates outputs $O = \{o_1, o_2, ..., o_m\}$, 
+$i \in I$ is interfering with $o \in O$ if and only if $\exists v_i, v_i' \mid v_o' \neq v_o \land v_i \neq v_i'$. Note 
+that all of the other input values $v_j, where i \neq j$ can take on any value -- they are not fixed to whatever the current
+values are.
+\end{definition}
+
+
+This means that each input parameter to multiply can have its own tag. So, multiply takes two input
+parameters op1 and op2, each of which can have its own tag. For simplicity sake, we will just refer to
+these tags as op1\_t and op2\_t. The product is then placed in an output parameter product which also
+has a tag called product\_t. Now we must decide how to tag the product. Let’s also assume that the tag is
+binary - either the data is tagged or it is not tagged represented by op1\_t = 1 and 0 respectively.
+A simple solution might be to say that the product is tagged as long as either of the operands are tagged.
+Since we are saying that the tags are binary and can be represented by 1 and 0, we can actually just
+calculate the product’s tag using simple bitwise operations: product\_t = op1\_t OR op2\_t. This simple rule
+works for most cases and is what someone might come up with as a first try.
+
+However, a case where this doesn’t work is if op1 is 0 and is not tagged (op1\_t = 0). Because anything
+multiplied by 0 will result in 0, the product is always guaranteed to be 0. That is, the product has nothing
+to do with op2, so it shouldn’t matter whether op2 is tagged or not. Note that this special case doesn’t
+apply if the first operand is indeed tagged though.
+
+Given the special case, one might wonder how we can identify all of these cases. We can do this by
+applying the non-interference principle which for our purposes state that the output should be tagged if
+and only if changing the value of tagged inputs will change the value of the output.
+
+How do we do this? Well normally we might use formal reasoning, however we won’t do that here
+because it is way complicated. We will instead use the brute force method and just enumerate all
+possibilities, because there really aren’t that many possibilities for this example. There will be a lot in
+general though, meaning exhaustive lists like this is not feasible in real life.
+
+To see how things work, we will first have to identify all variables in this problem. In particular, we have
+op1, op2, op1\_t, op2\_t, product and product\_t. Given these variables, we want to ask the question of
+whether the product should be tagged (i.e. whether product\_t = 1) if op1 is 0 and not tagged. Let’s start
+writing down the different combinations where the prime (‘) are used to represent a different value
+assignment.
+
+\begin{verbatim}
+0 x 0 = product
+0 x 1 = product'
+0 x 2 = product''
+...
+0 x op2 = product (the general case)
+\end{verbatim}
+
+We should quickly see that it doesn’t matter what we assign op2 to (since we are changing the potential
+value of op2, we are basically assuming that op2 is tagged), product = product' = product'' = ... = 0. Since
+product never changes, it means that op1 is non-interfering with op2. In this case we didn’t change the
+value of op1 to op1’ because op1 is not tagged. What if it was tagged?
+
+If op1 was tagged, then we have to try different assignments as well that includes:
+
+\begin{verbatim}
+0 x op2 = product
+1 x op2 = product'
+2 x op2 = product''
+... #all possible values of op1 with a single value of op2
+0 x op2' = product'''
+1 x op2' = product''''
+... #all possible values of op1 with a different value of op2
+op1 x op2 = product #all possible values of op1 with all possible values of op2 (the general case)
+\end{verbatim}
+
+It should be fairly obvious that product != product’ != product’’ ... This means that the product needs to
+be tagged if op1 is tagged. (You can convince yourself that the exception is if op2 is 0 and not tagged).
+Either way, we should see that determining whether the output (product) should be tagged depends not
+only on 1) the operation (multiply), 2) the tags of the inputs (op1\_t, op2\_t), but also 3) the actual
+concrete values of the inputs (op1, op2).
+
+Your assignment asks you to do this for different operations and also with bit-wise tags versus operand
+tags. That is, n this example, we have associated tags with entire operands, but this is not necessary. In
+fact we can assign tags to entire files down to operands down to individual bits (which is what
+memcheck does) -- we call this the {\em tagging granularity.}
+
